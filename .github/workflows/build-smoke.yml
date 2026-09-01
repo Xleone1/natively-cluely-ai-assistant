@@ -74,6 +74,7 @@ jobs:
         env:
           SUBMODULE_TOKEN: ${{ secrets.SUBMODULE_TOKEN || secrets.GH_APP_TOKEN }}
           IS_FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+          REPO_OWNER: ${{ github.repository_owner }}
         shell: bash
         run: |
           if [ -n "${SUBMODULE_TOKEN:-}" ]; then
@@ -81,6 +82,13 @@ jobs:
           elif [ "$IS_FORK_PR" = "true" ]; then
             echo "mode=core" >> "$GITHUB_OUTPUT"
             echo "::notice::Private premium source is unavailable to fork PRs; running the fork-safe core smoke scope."
+          elif [ "$REPO_OWNER" != "Natively-AI-assistant" ]; then
+            # Fork-internal PR (e.g. Xleone1:feature → Xleone1:main) has no
+            # SUBMODULE_TOKEN (secrets not copied to forks) and IS_FORK_PR is
+            # false because head and base are the same fork repo. Treat as core
+            # so the fork can validate the Linux/ Wayland stack without premium.
+            echo "mode=core" >> "$GITHUB_OUTPUT"
+            echo "::notice::Fork repository without premium credential; running fork-safe core smoke scope."
           else
             echo "mode=invalid" >> "$GITHUB_OUTPUT"
           fi
