@@ -188,6 +188,7 @@ jobs:
       - name: Verify sqlite-vec native extension loads (vec0)
         env:
           ELECTRON_RUN_AS_NODE: "1"
+        shell: bash
         run: |
           if [ "${RUNNER_OS}" = "Linux" ]; then
             xvfb-run -a npx --no-install electron scripts/verify-sqlite-vec-load.mjs
@@ -300,6 +301,7 @@ jobs:
       - name: Run Electron unit tests
         if: steps.smoke_scope.outputs.mode == 'full'
         continue-on-error: ${{ runner.os != 'macOS' }}
+        shell: bash
         run: |
           if [ "${RUNNER_OS}" = "Linux" ]; then
             xvfb-run -a npm test
