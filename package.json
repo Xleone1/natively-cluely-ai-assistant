@@ -254,7 +254,7 @@
     "beforePack": "./scripts/rebuild-native-for-target.cjs"
   },
   "keywords": [],
-  "author": "",
+  "author": "Natively <hello@natively.software>",
   "license": "SEE LICENSE IN LICENSE",
   "devDependencies": {
     "@electron/notarize": "^3.1.1",
