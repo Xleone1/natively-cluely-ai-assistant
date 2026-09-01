@@ -20,6 +20,10 @@ const packages = [
   // the O(n) JS cosine fallback (VectorStore logs "sqlite-vec not available")
   // instead of native vec0 search.
   'sqlite-vec-windows-x64',
+  // Phase 1 Linux parity (2026-09-01, docs/plans/linux-support-plan.md §2):
+  // same host/arch skip as darwin/win — a linux artifact built on darwin
+  // would lose vec0.so without this, degrading to cosine on CachyOS/Ubuntu.
+  'sqlite-vec-linux-x64',
 ];
 
 for (const pkg of packages) {

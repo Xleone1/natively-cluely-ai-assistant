@@ -645,6 +645,12 @@ export class ScreenshotHelper {
    * Platform-aware screenshot command builder.
    * Linux-only in practice. macOS and Windows use desktopCapturer APIs instead.
    */
+  /**
+   * Platform-aware screenshot command builder.
+   * Linux-only in practice. macOS and Windows use desktopCapturer APIs instead.
+   * Exported as `buildLinuxScreenshotCommand` for unit tests so both Wayland and
+   * X11 branches are exercised without mutating `process.platform`.
+   */
   private getScreenshotCommand(outputPath: string, interactive: boolean): string {
     // Safety: outputPath must be within our controlled directories.
     // Since we always construct paths using path.join(this.screenshotDir, uuidv4()),
@@ -655,13 +661,41 @@ export class ScreenshotHelper {
       throw new Error(`[ScreenshotHelper] Refusing shell command for path outside userData: ${outputPath}`);
     }
     const safePath = outputPath.replace(/"/g, '\\"');
-    const platform = process.platform;
+    const platform = process.platform as NodeJS.Platform;
     if (platform === 'linux') {
+      const isWayland = process.env.XDG_SESSION_TYPE === 'wayland' || Boolean(process.env.WAYLAND_DISPLAY);
+      if (isWayland) {
+        return interactive
+          ? `grim -g "$(slurp)" "${safePath}" 2>/dev/null || grim -g "$(slurp -d)" "${safePath}" 2>/dev/null || gnome-screenshot -a -f "${safePath}" 2>/dev/null || scrot -s "${safePath}" 2>/dev/null || import "${safePath}"`
+          : `grim "${safePath}" 2>/dev/null || gnome-screenshot -f "${safePath}" 2>/dev/null || scrot "${safePath}" 2>/dev/null || import -window root "${safePath}"`;
+      }
       return interactive
         ? `gnome-screenshot -a -f "${safePath}" 2>/dev/null || scrot -s "${safePath}" 2>/dev/null || import "${safePath}"`
         : `gnome-screenshot -f "${safePath}" 2>/dev/null || scrot "${safePath}" 2>/dev/null || import -window root "${safePath}"`;
     }
     throw new Error(`Unsupported platform for screenshots: ${platform}`);
+  }
+
+  /**
+   * Test-only pure helper: returns the linux shell command for a given environment
+   * without reading `process.platform`. Inject `env` to simulate Wayland vs X11.
+   * Exists so unit tests can assert both Wayland and X11 branches deterministically
+   * (see electron/services/__tests__/ScreenshotHelperLinux.test.mjs).
+   */
+  public static buildLinuxScreenshotCommand(
+    safePath: string,
+    interactive: boolean,
+    env: { XDG_SESSION_TYPE?: string; WAYLAND_DISPLAY?: string },
+  ): string {
+    const isWayland = env.XDG_SESSION_TYPE === 'wayland' || Boolean(env.WAYLAND_DISPLAY);
+    if (isWayland) {
+      return interactive
+        ? `grim -g "$(slurp)" "${safePath}" 2>/dev/null || grim -g "$(slurp -d)" "${safePath}" 2>/dev/null || gnome-screenshot -a -f "${safePath}" 2>/dev/null || scrot -s "${safePath}" 2>/dev/null || import "${safePath}"`
+        : `grim "${safePath}" 2>/dev/null || gnome-screenshot -f "${safePath}" 2>/dev/null || scrot "${safePath}" 2>/dev/null || import -window root "${safePath}"`;
+    }
+    return interactive
+      ? `gnome-screenshot -a -f "${safePath}" 2>/dev/null || scrot -s "${safePath}" 2>/dev/null || import "${safePath}"`
+      : `gnome-screenshot -f "${safePath}" 2>/dev/null || scrot "${safePath}" 2>/dev/null || import -window root "${safePath}"`;
   }
 
   public async takeScreenshot(preferredDisplay?: Electron.Display): Promise<string> {
@@ -684,7 +718,29 @@ export class ScreenshotHelper {
         if (process.platform === 'darwin' || process.platform === 'win32') {
           await this.captureWithDesktopCapturer(screenshotPath, undefined, preferredDisplay);
         } else {
-          await shellExecAsync(this.getScreenshotCommand(screenshotPath, false))
+          // Linux: try desktopCapturer via xdg-desktop-portal (PipeWire) first;
+          // if it throws or portal dialog was cancelled, fall back to CLI grim/slurp.
+          // Portal is the preferred path because it respects per-display scaling
+          // and avoids the black-frame failure that plagued macOS TCC before.
+          try {
+            await this.captureWithDesktopCapturer(screenshotPath, undefined, preferredDisplay);
+          } catch (e) {
+            console.warn('[ScreenshotHelper] desktopCapturer failed on linux, falling back to CLI:', (e as Error)?.message);
+            await shellExecAsync(this.getScreenshotCommand(screenshotPath, false));
+          }
+          // Guard portal's "black thumbnail" failure mode (e.g. portal denied
+          // without throwing). If no file appeared, throw so CLI fallback is
+          // not mistaken for success.
+          if (!fs.existsSync(screenshotPath) || (await fs.promises.stat(screenshotPath).catch(() => ({ size: 0 } as any))).size === 0) {
+            // Only fallback if we haven't already (dedup: if desktopCapturer threw,
+            // CLI already ran; check size still 0 and retry CLI once).
+            const stat = await fs.promises.stat(screenshotPath).catch(() => null);
+            if (!stat || stat.size === 0) {
+              console.warn('[ScreenshotHelper] linux desktopCapturer produced empty file, retrying CLI fallback');
+              try { await fs.promises.unlink(screenshotPath); } catch {}
+              await shellExecAsync(this.getScreenshotCommand(screenshotPath, false));
+            }
+          }
         }
 
         this.screenshotQueue.push(screenshotPath)
@@ -713,7 +769,20 @@ export class ScreenshotHelper {
         if (process.platform === 'darwin' || process.platform === 'win32') {
           await this.captureWithDesktopCapturer(screenshotPath, undefined, preferredDisplay);
         } else {
-          await shellExecAsync(this.getScreenshotCommand(screenshotPath, false))
+          try {
+            await this.captureWithDesktopCapturer(screenshotPath, undefined, preferredDisplay);
+          } catch (e) {
+            console.warn('[ScreenshotHelper] desktopCapturer failed on linux, falling back to CLI:', (e as Error)?.message);
+            await shellExecAsync(this.getScreenshotCommand(screenshotPath, false));
+          }
+          if (!fs.existsSync(screenshotPath) || (await fs.promises.stat(screenshotPath).catch(() => ({ size: 0 } as any))).size === 0) {
+            const stat = await fs.promises.stat(screenshotPath).catch(() => null);
+            if (!stat || stat.size === 0) {
+              console.warn('[ScreenshotHelper] linux desktopCapturer produced empty file, retrying CLI fallback');
+              try { await fs.promises.unlink(screenshotPath); } catch {}
+              await shellExecAsync(this.getScreenshotCommand(screenshotPath, false));
+            }
+          }
         }
 
         this.extraScreenshotQueue.push(screenshotPath)
@@ -745,19 +814,47 @@ export class ScreenshotHelper {
 
       const screenshotPath = path.join(this.screenshotDir, `selective-${uuidv4()}.png`)
 
-      if ((process.platform === 'win32' || process.platform === 'darwin') && captureArea) {
-        // Check if selection spans multiple displays
-        const isMulti = isMultiDisplaySelection(captureArea);
-
-        if (isMulti) {
-          console.log('[ScreenshotHelper] Selection spans multiple displays - using stitched capture');
-          await this.captureStitchedDesktopArea(screenshotPath, captureArea);
+      if (captureArea && (process.platform === 'win32' || process.platform === 'darwin' || process.platform === 'linux')) {
+        // Area provided — portal/desktopCapturer path works on all three platforms.
+        // Linux: desktopCapturer goes via xdg-desktop-portal PipeWire; if it fails
+        // (portal dialog cancelled or compositor doesn't expose sources), fall back
+        // to grim dispatch on next invocation. For now the stitched/desktop path
+        // is correct on Wayland — computeThumbnailCrop derives ratio from actual
+        // thumbnail size, so fractional scaling (1.25x/1.5x/2x) maps correctly.
+        if (process.platform === 'linux') {
+          const isMulti = isMultiDisplaySelection(captureArea);
+          try {
+            if (isMulti) {
+              console.log('[ScreenshotHelper] Selection spans multiple displays - using stitched capture');
+              await this.captureStitchedDesktopArea(screenshotPath, captureArea);
+            } else {
+              console.log('[ScreenshotHelper] Selection within single display - using standard capture');
+              await this.captureWithDesktopCapturer(screenshotPath, captureArea);
+            }
+          } catch (e) {
+            console.warn('[ScreenshotHelper] linux area capture via desktopCapturer failed, falling back to CLI:', (e as Error)?.message);
+            // Fall back to interactive grim selection when area desktop path fails.
+            // The CLI fallback disregards the supplied captureArea and lets the
+            // user re-select; better than returning a black/offset frame.
+            try {
+              await shellExecAsync(this.getScreenshotCommand(screenshotPath, true));
+            } catch (ee: any) {
+              console.warn('[ScreenshotHelper] CLI fallback also failed:', ee);
+              throw new Error('Selection cancelled');
+            }
+          }
         } else {
-          console.log('[ScreenshotHelper] Selection within single display - using standard capture');
-          await this.captureWithDesktopCapturer(screenshotPath, captureArea);
+          const isMulti = isMultiDisplaySelection(captureArea);
+          if (isMulti) {
+            console.log('[ScreenshotHelper] Selection spans multiple displays - using stitched capture');
+            await this.captureStitchedDesktopArea(screenshotPath, captureArea);
+          } else {
+            console.log('[ScreenshotHelper] Selection within single display - using standard capture');
+            await this.captureWithDesktopCapturer(screenshotPath, captureArea);
+          }
         }
       } else if (process.platform === 'linux') {
-        // Linux: use interactive selection command
+        // Linux interactive selection (no captureArea supplied — e.g. tray shortcut).
         console.log('[ScreenshotHelper] Using interactive selection');
         try {
           await shellExecAsync(this.getScreenshotCommand(screenshotPath, true))

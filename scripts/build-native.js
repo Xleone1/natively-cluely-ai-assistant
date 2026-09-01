@@ -141,7 +141,12 @@ if (os.platform() === 'darwin') {
   verifyArtifacts(macTargets.map((target) => artifactMap[target]));
 
 } else {
-  console.log(`Building for current platform: ${os.platform()}`);
+  // Architecture resolution — host arch determines the single expected artifact.
+  // On Linux this is `index.linux-x64-gnu.node` on x64 (CachyOS x86_64), with
+  // arm64/arm=gnueabihf for completeness even though electron-builder currently
+  // ships x64 only (package.json build.linux x64). The mapping is exhaustive so
+  // an unknown arch surfaces a clear error rather than silently producing no artifact.
+  console.log(`Building for current platform: ${os.platform()} (${os.arch()})`);
 
   const artifactMap = {
     win32: {
@@ -157,6 +162,9 @@ if (os.platform() === 'darwin') {
   };
 
   const expectedArtifacts = artifactMap[os.platform()]?.[os.arch()];
+  if (os.platform() === 'linux' && !expectedArtifacts) {
+    console.warn(`Warning: no artifact mapped for linux arch ${os.arch()} — proceeding but verifyArtifacts will be skipped`);
+  }
 
   // Windows only: unblock the artifact copy when the app is running.
   //
@@ -219,8 +227,38 @@ if (os.platform() === 'darwin') {
     }
   }
 
+  // Linux ldd verification — ensures the produced .node links against system libpulse/libasound
+  function verifyLinuxSharedDeps(artifacts) {
+    if (os.platform() !== 'linux' || !artifacts) return;
+    for (const art of artifacts) {
+      const p = path.join(nativeModulePath, art);
+      if (!fs.existsSync(p)) continue;
+      try {
+        const out = execSync(`ldd "${p}" 2>&1`, { encoding: 'utf8' });
+        const missing = out.split('\n').filter((l) => l.includes('not found'));
+        if (missing.length > 0) {
+          console.warn(`Warning: ${art} has missing shared libs:\n${missing.join('\n')}`);
+        } else {
+          console.log(`[build-native] ${art} ldd check passed`);
+        }
+      } catch (e) {
+        console.warn(`[build-native] ldd check failed for ${art}: ${e.message}`);
+      }
+    }
+  }
+
   try {
-    runCommand('npx napi build --platform --release');
+    // Prefer locally-installed napi cli (offline-friendly) over npx network fetch.
+    // `npx --no-install` would fail fast if not present; plain `npx` will fetch if missing.
+    // Try local binary first, then fall back to npx.
+    let napiCmd = 'npx napi build --platform --release';
+    try {
+      const localNapi = path.join(__dirname, '..', 'node_modules', '.bin', 'napi');
+      if (fs.existsSync(localNapi)) {
+        napiCmd = `"${localNapi}" build --platform --release`;
+      }
+    } catch {}
+    runCommand(napiCmd);
     // Verified INSIDE the try, before the stale copies are swept. napi can exit
     // 0 and still not leave the artifact this platform/arch expects — a
     // toolchain that silently falls back to ia32, or a target-triple rename,
@@ -229,6 +267,7 @@ if (os.platform() === 'darwin') {
     // failure, with the restore path already behind us.
     if (expectedArtifacts) {
       verifyArtifacts(expectedArtifacts);
+      verifyLinuxSharedDeps(expectedArtifacts);
     }
   } catch (err) {
     // Put the last-good artifacts back so a failed build leaves the tree no
