@@ -160,7 +160,8 @@ jobs:
           # it looks for win-x64 inside the linux NuGet package on fresh runners.
           # Our default is CPU (NATIVELY_LINUX_CUDA is unset), so skip the CUDA
           # payload entirely on linux to keep npm ci green.
-          ONNXRUNTIME_NODE_INSTALL_CUDA: "0"
+          # Value is `skip` per onnxruntime-node/script/install --help.
+          ONNXRUNTIME_NODE_INSTALL_CUDA: "skip"
         run: npm ci
 
       # Belt-and-suspenders: confirm postinstall produced correct-arch
