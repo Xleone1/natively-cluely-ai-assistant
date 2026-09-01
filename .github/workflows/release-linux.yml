@@ -113,11 +113,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            # Tag push → publish to the GitHub Release for that tag (so it shows up on Releases)
+          # Only publish to GitHub Releases when running on the upstream
+          # (Natively-AI-assistant) — forks have no permission to publish there
+          # and get 403 Forbidden from builder-util. Fork tags still build the
+          # AppImage/deb and upload as Actions artifact (natively-linux).
+          if [[ "${{ github.repository_owner }}" == "Natively-AI-assistant" && "${{ github.ref }}" == refs/tags/v* ]]; then
             xvfb-run -a ./node_modules/.bin/electron-builder --linux --publish always
           else
-            # PR / workflow_dispatch → just build, upload as Actions artifact
             xvfb-run -a ./node_modules/.bin/electron-builder --linux --publish never
           fi
           echo "Artifacts:"
