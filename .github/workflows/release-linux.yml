@@ -113,7 +113,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          xvfb-run -a ./node_modules/.bin/electron-builder --linux --publish never
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            # Tag push → publish to the GitHub Release for that tag (so it shows up on Releases)
+            xvfb-run -a ./node_modules/.bin/electron-builder --linux --publish always
+          else
+            # PR / workflow_dispatch → just build, upload as Actions artifact
+            xvfb-run -a ./node_modules/.bin/electron-builder --linux --publish never
+          fi
           echo "Artifacts:"
           ls -lh release/*.AppImage release/*.deb release/latest-linux.yml 2>&1 | head -30
 
