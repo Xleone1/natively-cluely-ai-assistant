@@ -144,6 +144,12 @@ jobs:
           cache: npm
 
       - name: Install dependencies
+        env:
+          # Linux: onnxruntime-node 1.22.0's GPU downloader has a known race where
+          # it looks for win-x64 inside the linux NuGet package on fresh runners.
+          # Our default is CPU (NATIVELY_LINUX_CUDA is unset), so skip the CUDA
+          # payload entirely on linux to keep npm ci green.
+          ONNXRUNTIME_NODE_INSTALL_CUDA: "0"
         run: npm ci
 
       # Belt-and-suspenders: confirm postinstall produced correct-arch
