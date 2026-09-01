@@ -93,19 +93,33 @@ const REQUIRED_WORKER_FILES = [
 
 // Required native binaries for the packaged app (the asarUnpack globs must place
 // them under app.asar.unpacked). Checked in packaged mode only.
-const REQUIRED_UNPACKED_NATIVE = [
-  'node_modules/better-sqlite3/build/Release/better_sqlite3.node',
-  'node_modules/keytar/build/Release/keytar.node',
-  'node_modules/onnxruntime-node/bin',
-  'node_modules/@img/sharp-darwin-arm64/lib',
-  'node_modules/@img/sharp-libvips-darwin-arm64/lib',
-  'node_modules/@img/sharp-darwin-x64/lib',
-  'node_modules/@img/sharp-libvips-darwin-x64/lib',
-  'node_modules/sqlite-vec-darwin-arm64/vec0.dylib',
-  'node_modules/sqlite-vec-darwin-x64/vec0.dylib',
-  'native-module/index.darwin-arm64.node',
-  'native-module/index.darwin-x64.node',
-];
+// Linux artifacts are platform-conditional — building on darwin must not require
+// linux .node/.so, and building on linux must require the linux node (same guard
+// as build-smoke's per-platform matrix). Keep the list single-source for verifySource.
+const REQUIRED_UNPACKED_NATIVE = (() => {
+  const base = [
+    'node_modules/better-sqlite3/build/Release/better_sqlite3.node',
+    'node_modules/keytar/build/Release/keytar.node',
+    'node_modules/onnxruntime-node/bin',
+    'node_modules/@img/sharp-darwin-arm64/lib',
+    'node_modules/@img/sharp-libvips-darwin-arm64/lib',
+    'node_modules/@img/sharp-darwin-x64/lib',
+    'node_modules/@img/sharp-libvips-darwin-x64/lib',
+    'node_modules/sqlite-vec-darwin-arm64/vec0.dylib',
+    'node_modules/sqlite-vec-darwin-x64/vec0.dylib',
+    'native-module/index.darwin-arm64.node',
+    'native-module/index.darwin-x64.node',
+  ];
+  // Linux artifacts — presence checked only when running on linux or when explicitly
+  // validating a linux unpack (packaged mode). Source mode on non-linux skips them
+  // so darwin host `npm run verify:packaged-local-assets` stays green.
+  const linux = [
+    'native-module/index.linux-x64-gnu.node',
+    'node_modules/sqlite-vec-linux-x64/vec0.so',
+  ];
+  const isLinuxCheck = process.platform === 'linux' || process.argv.includes('--include-linux');
+  return isLinuxCheck ? [...base, ...linux] : base;
+})();
 
 const errors = [];
 const notes = [];

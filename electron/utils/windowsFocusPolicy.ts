@@ -75,6 +75,10 @@ export function attachNoActivate(
   win: NoActivateWindowLike | null | undefined,
   platform: NodeJS.Platform = process.platform,
 ): boolean {
+  // Phase 3 Linux contract: overlay click-through is handled by
+  // syncOverlayInteractionPolicy's forwardSupported guard, not by WS_EX_NOACTIVATE.
+  // Early-return here so a test that injects 'linux' never asserts focusable=false.
+  if (platform !== 'win32') return false;
   if (!isClickActivatingPlatform(platform)) return false;
   // No stealth hook → keep the window focusable (fall back to focus-to-type
   // with a blur) rather than making an untypeable no-activate window.

@@ -6,7 +6,7 @@ edition = "2021"
 license-file = "../LICENSE"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 napi = { version = "3.8.3", features = ["napi4"] }
@@ -43,6 +43,14 @@ objc2-foundation = "0.2"
 # core-foundation gives us the CFRunLoop the tap must attach to.
 core-graphics = "0.24"
 core-foundation = "0.10"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# PipeWire primary + Pulse fallback for system-audio monitor capture.
+# Both are kept behind the `speaker/pipewire.rs` module's dual-backend design:
+# `pipewire` crate attempts native monitor; on failure, `libpulse-binding` retries
+# via pipewire-pulse compat (see docs/plans/linux-support-plan.md §3.1).
+libpulse-binding = "2.30"
+libpulse-simple-binding = "2.29"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 wasapi = "0.13.0"

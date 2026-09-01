@@ -279,21 +279,23 @@ export class WindowHelper {
     // default), re-exposing it via `NSWindowSharingReadOnly` and overriding the
     // unconditional `NSWindowSharingNone` the native stealth module applies to
     // exactly these three windows. Force it on for them regardless of `enable`.
-    const overlayChrome = [this.overlayWindow, this.pillWindow, this.toggleWindow];
-    overlayChrome.forEach((win) => {
-      if (win && !win.isDestroyed()) {
-        win.setContentProtection(true);
+    const safeSet = (win: Electron.BrowserWindow | null, value: boolean) => {
+      if (!win || win.isDestroyed()) return;
+      try {
+        win.setContentProtection(value);
+      } catch {
+        // Best-effort on Linux (Wayland): WDA_EXCLUDEFROMCAPTURE not implemented,
+        // setContentProtection may be a no-op or throw on older Electron. Gracefully
+        // ignore so overlay still instantiates transparent/frameless/alwaysOnTop.
       }
-    });
+    };
+    const overlayChrome = [this.overlayWindow, this.pillWindow, this.toggleWindow];
+    overlayChrome.forEach((win) => safeSet(win, true));
     // The launcher and popover catcher are not meeting chrome; they follow the
     // undetectable-mode toggle (the launcher is the main window shown outside a
     // meeting, and the native module deliberately does NOT force-hide it).
     const undetectableFollowers = [this.launcherWindow, this.popoverCatcher];
-    undetectableFollowers.forEach((win) => {
-      if (win && !win.isDestroyed()) {
-        win.setContentProtection(enable);
-      }
-    });
+    undetectableFollowers.forEach((win) => safeSet(win, enable));
   }
 
   /**
@@ -625,7 +627,11 @@ export class WindowHelper {
       return;
     }
 
-    this.launcherWindow.setContentProtection(this.contentProtection);
+    try {
+      this.launcherWindow.setContentProtection(this.contentProtection);
+    } catch {
+      // Best-effort on Linux/Wayland — ignore.
+    }
     // Apply the persisted undetectable state to the launcher's taskbar presence
     // now, at creation — a session that STARTS undetectable would otherwise show
     // a taskbar button until the user toggled the setting off and on again.
@@ -825,7 +831,11 @@ export class WindowHelper {
     // applyContentProtection). This mirrors the native module's unconditional
     // NSWindowSharingNone and closes the leak on builds where that native binary
     // is unavailable (e.g. an Intel prebuild mismatch).
-    this.overlayWindow.setContentProtection(true);
+    try {
+      this.overlayWindow.setContentProtection(true);
+    } catch {
+      // Best-effort on Linux/Wayland — ignore.
+    }
     // Apply the current mouse-interaction policy to the NEW window. Without
     // this, a window (re)created while stealth passthrough is ON would start
     // fully interactive — silently breaking passthrough until the next toggle.
@@ -1643,7 +1653,11 @@ export class WindowHelper {
       // Always protected, like the overlay body — the pill/toggle are the
       // on-screen meeting chrome and must never leak into a shared screen
       // regardless of undetectable/dock mode (see applyContentProtection).
-      win.setContentProtection(true);
+      try {
+        win.setContentProtection(true);
+      } catch {
+        // Best-effort on Linux/Wayland.
+      }
       if (process.platform === 'darwin') {
         win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
         win.setHiddenInMissionControl(true);
@@ -2312,7 +2326,11 @@ export class WindowHelper {
         // 'show' event keeps pill and body on one visual transition; doing it
         // after the timer would flash the pill through content protection.
         this.applyOverlayAuxVisibility(true);
-        this.overlayWindow.setContentProtection(true);
+        try {
+          this.overlayWindow.setContentProtection(true);
+        } catch {
+          // Best-effort on Linux/Wayland.
+        }
         // Small delay to ensure Windows DWM processes the flag before making it opaque
 
         if (this.opacityTimeout) clearTimeout(this.opacityTimeout);
@@ -2322,7 +2340,10 @@ export class WindowHelper {
             this.pillWindow?.setOpacity(1);
             this.toggleWindow?.setOpacity(1);
             // Re-assert z-order on Windows — DWM can silently demote the HWND after hide/show
-            this.overlayWindow.setAlwaysOnTop(true, 'screen-saver');
+            // Guard: only win32 needs screen-saver level re-assert; linux already alwaysOnTop:true default.
+            if (process.platform === 'win32') {
+              this.overlayWindow.setAlwaysOnTop(true, 'screen-saver');
+            }
             if (!inactive) this.overlayWindow.focus();
           }
         }, 60);
@@ -2334,7 +2355,11 @@ export class WindowHelper {
         this.toggleWindow?.setOpacity(1);
         // Always protected — the overlay must never appear in a screen capture,
         // regardless of undetectable/dock mode (see applyContentProtection).
-        this.overlayWindow.setContentProtection(true);
+        try {
+          this.overlayWindow.setContentProtection(true);
+        } catch {
+          // Best-effort on Linux/Wayland.
+        }
         // No setAlwaysOnTop here: this branch is macOS/Linux only (Windows always
         // takes the shielded branch above, which re-asserts z-order itself). On
         // macOS calling setAlwaysOnTop would trigger [NSApp activate] and steal
@@ -2411,7 +2436,11 @@ export class WindowHelper {
         this.launcherWindow.setOpacity(0);
         if (inactive) this.launcherWindow.showInactive();
         else this.launcherWindow.show();
-        this.launcherWindow.setContentProtection(true);
+        try {
+          this.launcherWindow.setContentProtection(true);
+        } catch {
+          // Best-effort on Linux/Wayland.
+        }
 
         if (this.opacityTimeout) clearTimeout(this.opacityTimeout);
         this.opacityTimeout = setTimeout(() => {
@@ -2423,7 +2452,11 @@ export class WindowHelper {
       } else {
         // Restore opacity (may have been zeroed pre-screenshot by hideMainWindow)
         this.launcherWindow.setOpacity(1);
-        this.launcherWindow.setContentProtection(this.contentProtection);
+        try {
+          this.launcherWindow.setContentProtection(this.contentProtection);
+        } catch {
+          // Best-effort on Linux/Wayland.
+        }
         if (inactive) this.launcherWindow.showInactive();
         else this.launcherWindow.show();
         if (!inactive) this.launcherWindow.focus();
