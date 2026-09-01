@@ -23,6 +23,20 @@ pub mod speaker;
 #[cfg(target_os = "macos")]
 pub mod stealth_window;
 
+#[cfg(target_os = "linux")]
+pub mod stealth_window_linux {
+    use napi::bindgen_prelude::*;
+    /// Linux no-op stub — same NAPI signature as macOS `apply_stealth_to_window`
+    /// so `require('natively-audio').applyStealthToWindow` never throws
+    /// `missing symbol` when the same JS bundle runs on Wayland.
+    #[napi]
+    pub fn apply_stealth_to_window(_handle: Buffer) -> Result<()> {
+        Ok(())
+    }
+}
+#[cfg(target_os = "linux")]
+pub use stealth_window_linux::apply_stealth_to_window;
+
 #[cfg(target_os = "macos")]
 pub mod keyboard_tap;
 

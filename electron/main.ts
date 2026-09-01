@@ -125,6 +125,34 @@ try {
   // auto-reload handler recovers it.
 }
 
+// ============================================================================
+// LINUX / WAYLAND OZONE SWITCHES (2026-09-01, docs/plans/linux-support-plan.md §3.3)
+//
+// Must run before app.whenReady() / before Chromium assembles its GPU+renderer
+// command line. On Wayland, Ozone is the abstracted platform layer; without
+// these, Electron falls back to X11/XWayland and desktopCapturer shows black
+// or offset frames, and the overlay loses transparency/alwaysOnTop semantics.
+// DarWin/Win32 are untouched — gate is strictly `process.platform === 'linux'`.
+// ============================================================================
+try {
+  if (process.platform === 'linux') {
+    // UseOzonePlatform + WaylandWindowDecorations enables native Wayland when
+    // available, falling back to X11 via XWayland when WAYLAND_DISPLAY is absent.
+    // `ozone-platform-hint=auto` is the Electron-recommended value (see
+    // https://www.electronjs.org/docs/latest/api/command-line-switches).
+    app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
+    app.commandLine.appendSwitch('enable-features', 'UseOzonePlatform,WaylandWindowDecorations');
+    if (process.env.XDG_SESSION_TYPE === 'wayland') {
+      app.commandLine.appendSwitch('enable-wayland-ime', 'true');
+    }
+    console.log(
+      `[Ozone] linux switches applied (XDG_SESSION_TYPE=${process.env.XDG_SESSION_TYPE ?? 'unset'} WAYLAND_DISPLAY=${process.env.WAYLAND_DISPLAY ?? 'unset'})`
+    );
+  }
+} catch (e) {
+  console.warn('[Ozone] failed to apply linux switches:', (e as Error)?.message);
+}
+
 /**
  * Whether THIS build carries a real Developer ID signature.
  *

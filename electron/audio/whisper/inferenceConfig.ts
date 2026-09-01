@@ -227,7 +227,21 @@ export function resolveInferenceConfig(): InferenceConfig {
         return { executionProviders: ['dml', 'cpu'], dtype: WHISPER_SAFE_DTYPE };
     }
 
-    // Intel Mac, Linux, unknown — CPU. Per-module gives a real speedup on
+    if (platform === 'linux') {
+        // Linux — default CPU. Opt-in CUDA when explicitly requested via
+        // NATIVELY_LINUX_CUDA=1 and the ORT CUDA EP is available. No host probe
+        // here; whisperWorker handles EP fallback (unknown EP → CPU). The env
+        // gate ensures CPU remains the safe default on CachyOS/Ubuntu without
+        // nvidia drivers, matching the linux-support-plan §3.4 contract.
+        if (process.env.NATIVELY_LINUX_CUDA === '1') {
+            // whisperWorker/onnxruntime-node will drop unknown 'cuda' gracefully
+            // to 'cpu', so returning it unconditionally here is safe.
+            return { executionProviders: ['cuda', 'cpu'], dtype: WHISPER_SAFE_DTYPE };
+        }
+        return { executionProviders: ['cpu'], dtype: WHISPER_SAFE_DTYPE };
+    }
+
+    // Intel Mac, unknown — CPU. Per-module gives a real speedup on
     // decoder-heavy inference without sacrificing encoder accuracy.
     return { executionProviders: ['cpu'], dtype: WHISPER_SAFE_DTYPE };
 }
