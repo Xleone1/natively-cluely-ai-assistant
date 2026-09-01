@@ -32,10 +32,14 @@ jobs:
         id: submodule_token
         env:
           SUBMODULE_TOKEN: ${{ secrets.SUBMODULE_TOKEN || secrets.GH_APP_TOKEN }}
+          REPO_OWNER: ${{ github.repository_owner }}
         shell: bash
         run: |
           if [ -n "${SUBMODULE_TOKEN:-}" ]; then
             echo "available=true" >> "$GITHUB_OUTPUT"
+          elif [ "$REPO_OWNER" != "Natively-AI-assistant" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Fork release without premium — building core (no premium) for Linux validation."
           else
             echo "available=false" >> "$GITHUB_OUTPUT"
             echo "::error::A SUBMODULE_TOKEN or GH_APP_TOKEN with access to Natively-AI-assistant/natively-premium is required for a release build."
@@ -58,7 +62,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y \
-            libasound2-dev libpulse-dev libdbus-1-dev \
+            libasound2-dev libpulse-dev libdbus-1-dev libsecret-1-dev \
             libvips-dev libsqlite3-dev \
             xvfb
 
@@ -72,13 +76,19 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install dependencies
+        env:
+          ONNXRUNTIME_NODE_INSTALL_CUDA: "skip"
         run: npm ci
 
       - name: Build
         run: |
           set -euo pipefail
           npm run build
-          npm run build:electron
+          if [ "${{ steps.submodule_token.outputs.available }}" = "true" ]; then
+            npm run build:electron
+          else
+            npm run build:electron:core-smoke
+          fi
 
       - name: Build native module (linux x64)
         run: |
