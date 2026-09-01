@@ -42,13 +42,14 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     strategy:
-      # Keep both legs running: knowing whether a failure is shared or
+      # Keep all legs running: knowing whether a failure is shared or
       # platform-specific is the whole point of the matrix.
       fail-fast: false
       matrix:
         os:
           - macos-latest
           - windows-latest
+          - ubuntu-latest
 
     steps:
       - name: Checkout
@@ -137,6 +138,16 @@ jobs:
           # rather than an empty directory that fails 200 lines later.
           test -f premium/electron/knowledge/CompanyResearchEngine.ts
 
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev libpulse-dev libdbus-1-dev libsecret-1-dev \
+            libvips-dev libsqlite3-dev \
+            xvfb pulseaudio
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -172,10 +183,17 @@ jobs:
       # extension is missing, which is exactly how a broken platform binary
       # would otherwise ship green. Runs under Electron's ABI because
       # postinstall builds better-sqlite3 for Electron, not system Node.
+      # Linux (Phase 1): runs under xvfb-run because Electron needs a display
+      # server even when run with --no-sandbox/ELECTRON_RUN_AS_NODE.
       - name: Verify sqlite-vec native extension loads (vec0)
         env:
           ELECTRON_RUN_AS_NODE: "1"
-        run: npx --no-install electron scripts/verify-sqlite-vec-load.mjs
+        run: |
+          if [ "${RUNNER_OS}" = "Linux" ]; then
+            xvfb-run -a npx --no-install electron scripts/verify-sqlite-vec-load.mjs
+          else
+            npx --no-install electron scripts/verify-sqlite-vec-load.mjs
+          fi
 
       # TypeScript 7 is now the PRIMARY type-checker: `typecheck:electron` runs
       # node_modules/typescript7/bin/tsc. Emit is untouched — esbuild owns
@@ -281,8 +299,13 @@ jobs:
       # `continue-on-error` too and the leg is enforcing on both platforms.
       - name: Run Electron unit tests
         if: steps.smoke_scope.outputs.mode == 'full'
-        continue-on-error: ${{ runner.os == 'Windows' }}
-        run: npm test
+        continue-on-error: ${{ runner.os != 'macOS' }}
+        run: |
+          if [ "${RUNNER_OS}" = "Linux" ]; then
+            xvfb-run -a npm test
+          else
+            npm test
+          fi
 
       - name: Run fork-safe core Electron tests
         if: ${{ !cancelled() && steps.smoke_scope.outputs.mode == 'core' }}
